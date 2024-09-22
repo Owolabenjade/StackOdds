@@ -279,25 +279,30 @@
 
 ;; Helper function to split a string into a list
 (define-read-only (split-string (str (string-ascii 50)) (delimiter (string-ascii 1)))
-  (fold split-string-fold 
-        { acc: (list), current: "" } 
-        (string-to-list str))
-)
-
-;; Helper function for string splitting
-(define-read-only (split-string-fold (char (string-utf8 1)) (state { acc: (list 10 (string-ascii 20)), current: (string-ascii 20) }))
-  (let ((current (get current state))
-        (acc (get acc state)))
-    (if (is-eq char delimiter)
-        { acc: (append acc current), current: "" }
-        { acc: acc, current: (concat current char) }
+  (let ((str-len (len str)))
+    (if (<= str-len u0)
+      (err "Empty string")
+      (let ((result (list)))
+        (var-set split-string-result result)
+        (var-set split-string-current "")
+        (for char-index (range u0 str-len)
+          (let ((current-char (slice str char-index (+ char-index u1))))
+            (if (is-eq current-char delimiter)
+              (begin
+                (var-set split-string-result (append (var-get split-string-result) (var-get split-string-current)))
+                (var-set split-string-current "")
+              )
+              (var-set split-string-current (concat (var-get split-string-current) current-char))
+            )
+          )
+        )
+        (if (is-eq (var-get split-string-current) "")
+          (var-get split-string-result)
+          (append (var-get split-string-result) (var-get split-string-current))
+        )
+      )
     )
   )
-)
-
-;; Helper function to convert a string to a list of characters
-(define-read-only (string-to-list (str (string-ascii 50)))
-  (map (unwrap-panic (element-at (as-max-len? str u1) u0)) (list u0 u1 u2 u3 u4 u5 u6 u7 u8 u9))
 )
 
 ;; Function to get contract balance
