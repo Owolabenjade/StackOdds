@@ -1,4 +1,5 @@
-;; Updated smart contract with enhanced logic for parlay, over/under, and point spread bets in the claim-bet-winnings function.
+;; Smart contract for a simple sports betting system on Stacks blockchain using Clarity.
+;; This contract includes functionalities for creating events, placing bets, and resolving them.
 
 (define-data-var total-event-count uint 0) ;; Counter for total number of events
 (define-data-var total-bet-count uint 0) ;; Counter for total number of bets
@@ -76,52 +77,46 @@
 (define-public (place-bet-on-event (event-id uint) (selected-outcome (string-ascii 20)) (bet-type (string-ascii 20)) (bet-details (optional (string-ascii 50))))
   (let (
         (new-bet-id (+ (var-get total-bet-count) u1))
-        (betting-event (map-get? betting-events {event-id: event-id}))
+        (betting-event (unwrap! (map-get betting-events {event-id: event-id}) (err ERR_INVALID_OUTCOME))) ;; Use unwrap! with map-get
        )
-    (match betting-event
-      (some {possible-outcomes: possible-outcomes, event-resolved: event-resolved, total-staked: total-staked, outcome-staked: outcome-staked}
-        ;; Check if the selected outcome is valid
-        (asserts! (is-eq (or (is-eq (get 0 possible-outcomes) selected-outcome)
-                             (is-eq (get 1 possible-outcomes) selected-outcome)) true)
-                  (err ERR_INVALID_OUTCOME))
-        ;; Ensure the event is not resolved yet
-        (asserts! (is-eq event-resolved false) (err ERR_EVENT_NOT_RESOLVED))
+    ;; Check if the selected outcome is valid
+    (asserts! (or (is-eq (get 0 (get possible-outcomes betting-event)) selected-outcome)
+                  (is-eq (get 1 (get possible-outcomes betting-event)) selected-outcome)) (err ERR_INVALID_OUTCOME))
+    ;; Ensure the event is not resolved yet
+    (asserts! (is-eq (get event-resolved betting-event) false) (err ERR_EVENT_NOT_RESOLVED))
 
-        ;; Validate bet type and details
-        (asserts! (is-valid-bet-type bet-type bet-details) (err ERR_INVALID_BET_TYPE))
-        
-        ;; Calculate new total staked amount
-        (let (
-              (new-total-staked (+ total-staked (stx-get-balance tx-sender)))
-              (new-outcome-staked (+ (get selected-outcome outcome-staked u0) (stx-get-balance tx-sender)))
-             )
-          ;; Update event with new staked amounts
-          (map-set betting-events
-            {event-id: event-id}
-            {event-title: (get event-title (unwrap-panic (map-get betting-events {event-id: event-id}))),
-             possible-outcomes: possible-outcomes, event-resolved: false, winning-outcome: none,
-             total-score: (get total-score (unwrap-panic (map-get betting-events {event-id: event-id}))),
-             point-spread: (get point-spread (unwrap-panic (map-get betting-events {event-id: event-id}))),
-             total-staked: new-total-staked, outcome-staked: (merge-outcome-staked outcome-staked selected-outcome (stx-get-balance tx-sender))}
-          )
-
-          ;; Save the bet information
-          (map-set placed-bets
-            {bet-id: new-bet-id}
-            {associated-event-id: event-id, bettor-address: tx-sender, bet-amount: (stx-get-balance tx-sender), 
-             chosen-outcome: selected-outcome, bet-type: bet-type, bet-details: bet-details, payout-claimed: false}
-          )
-          
-          ;; Update the bet counter
-          (var-set total-bet-count new-bet-id)
-          
-          ;; Emit event log
-          (print {event: "bet-placed", bet-id: new-bet-id, event-id: event-id, bettor: tx-sender, amount: (stx-get-balance tx-sender), outcome: selected-outcome, type: bet-type})
-          
-          (ok new-bet-id)
-        )
+    ;; Validate bet type and details
+    (asserts! (is-valid-bet-type bet-type bet-details) (err ERR_INVALID_BET_TYPE))
+    
+    ;; Calculate new total staked amount
+    (let (
+          (new-total-staked (+ (get total-staked betting-event) (stx-get-balance tx-sender)))
+          (new-outcome-staked (+ (get selected-outcome (get outcome-staked betting-event) u0) (stx-get-balance tx-sender)))
+         )
+      ;; Update event with new staked amounts
+      (map-set betting-events
+        {event-id: event-id}
+        {event-title: (get event-title betting-event),
+         possible-outcomes: (get possible-outcomes betting-event), event-resolved: false, winning-outcome: none,
+         total-score: (get total-score betting-event),
+         point-spread: (get point-spread betting-event),
+         total-staked: new-total-staked, outcome-staked: (merge-outcome-staked (get outcome-staked betting-event) selected-outcome (stx-get-balance tx-sender))}
       )
-      (none (err ERR_INVALID_OUTCOME))
+
+      ;; Save the bet information
+      (map-set placed-bets
+        {bet-id: new-bet-id}
+        {associated-event-id: event-id, bettor-address: tx-sender, bet-amount: (stx-get-balance tx-sender), 
+         chosen-outcome: selected-outcome, bet-type: bet-type, bet-details: bet-details, payout-claimed: false}
+      )
+      
+      ;; Update the bet counter
+      (var-set total-bet-count new-bet-id)
+      
+      ;; Emit event log
+      (print {event: "bet-placed", bet-id: new-bet-id, event-id: event-id, bettor: tx-sender, amount: (stx-get-balance tx-sender), outcome: selected-outcome, type: bet-type})
+      
+      (ok new-bet-id)
     )
   )
 )
@@ -136,15 +131,10 @@
 
 ;; Function to calculate odds for an outcome
 (define-read-only (calculate-odds (event-id uint) (selected-outcome (string-ascii 20)))
-  (let ((event (map-get? betting-events {event-id: event-id})))
-    (match event
-      (some {total-staked: total-staked, outcome-staked: outcome-staked}
-        (if (is-eq total-staked u0)
-          (err u0) ;; Avoid division by zero
-          (ok (/ (* total-staked u100) (get selected-outcome outcome-staked u1))) ;; Odds calculation
-        )
-      )
-      (err u0)
+  (let ((event (unwrap! (map-get betting-events {event-id: event-id}) (err u0)))) ;; Use unwrap! with map-get
+    (if (is-eq (get total-staked event) u0)
+      (err u0) ;; Avoid division by zero
+      (ok (/ (* (get total-staked event) u100) (get selected-outcome (get outcome-staked event) u1))) ;; Odds calculation
     )
   )
 )
@@ -152,98 +142,82 @@
 ;; Function to resolve a betting event and declare a winning outcome
 (define-public (resolve-betting-event (event-id uint) (winning-outcome (string-ascii 20)) (total-score (optional uint)))
   (let (
-        (betting-event (map-get? betting-events {event-id: event-id}))
+        (betting-event (unwrap! (map-get betting-events {event-id: event-id}) (err ERR_INVALID_OUTCOME))) ;; Use unwrap! with map-get
        )
-    (match betting-event
-      (some {possible-outcomes: possible-outcomes, event-resolved: event-resolved}
-        ;; Ensure only the contract owner can resolve
-        (asserts! (is-eq (tx-sender) (contract-owner?)) (err ERR_UNAUTHORIZED))
-        ;; Check if the selected winning outcome is valid
-        (asserts! (is-eq (or (is-eq (get 0 possible-outcomes) winning-outcome)
-                             (is-eq (get 1 possible-outcomes) winning-outcome)) true)
-                  (err ERR_INVALID_OUTCOME))
-        ;; Ensure the event is not already resolved
-        (asserts! (is-eq event-resolved false) (err ERR_EVENT_NOT_RESOLVED))
-        
-        ;; Update the event with the winning outcome and total score
-        (map-set betting-events
-          {event-id: event-id}
-          {event-title: (get event-title (unwrap-panic (map-get betting-events {event-id: event-id}))),
-           possible-outcomes: possible-outcomes, event-resolved: true, winning-outcome: (some winning-outcome),
-           total-score: total-score,
-           point-spread: (get point-spread (unwrap-panic (map-get betting-events {event-id: event-id}))),
-           total-staked: (get total-staked (unwrap-panic (map-get betting-events {event-id: event-id}))), 
-           outcome-staked: (get outcome-staked (unwrap-panic (map-get betting-events {event-id: event-id})))}
-        )
-        
-        ;; Emit event log
-        (print {event: "event-resolved", event-id: event-id, winning-outcome: winning-outcome})
-        
-        (ok event-id)
-      )
-      (none (err ERR_INVALID_OUTCOME))
+    ;; Ensure only the contract owner can resolve
+    (asserts! (is-eq (tx-sender) (contract-owner?)) (err ERR_UNAUTHORIZED))
+    ;; Check if the selected winning outcome is valid
+    (asserts! (or (is-eq (get 0 (get possible-outcomes betting-event)) winning-outcome)
+                  (is-eq (get 1 (get possible-outcomes betting-event)) winning-outcome)) (err ERR_INVALID_OUTCOME))
+    ;; Ensure the event is not already resolved
+    (asserts! (is-eq (get event-resolved betting-event) false) (err ERR_EVENT_NOT_RESOLVED))
+    
+    ;; Update the event with the winning outcome and total score
+    (map-set betting-events
+      {event-id: event-id}
+      {event-title: (get event-title betting-event),
+       possible-outcomes: (get possible-outcomes betting-event), event-resolved: true, winning-outcome: (some winning-outcome),
+       total-score: total-score,
+       point-spread: (get point-spread betting-event),
+       total-staked: (get total-staked betting-event), 
+       outcome-staked: (get outcome-staked betting-event)}
     )
+    
+    ;; Emit event log
+    (print {event: "event-resolved", event-id: event-id, winning-outcome: winning-outcome})
+    
+    (ok event-id)
   )
 )
 
 ;; Function to claim winnings from a resolved bet with complex logic for parlay, over/under, and point spread bets
 (define-public (claim-bet-winnings (bet-id uint))
   (let (
-        (bet-details (map-get? placed-bets {bet-id: bet-id}))
+        (bet-details (unwrap! (map-get placed-bets {bet-id: bet-id}) (err ERR_INVALID_OUTCOME))) ;; Use unwrap! with map-get
        )
-    (match bet-details
-      (some {associated-event-id: event-id, bettor-address: bettor, bet-amount: bet-amount, chosen-outcome: chosen-outcome, bet-type: bet-type, bet-details: bet-details, payout-claimed: payout-claimed}
-        (let (
-              (betting-event (map-get? betting-events {event-id: event-id}))
-             )
-          (match betting-event
-            (some {event-resolved: event-resolved, winning-outcome: winning-outcome, total-staked: total-staked, outcome-staked: outcome-staked, total-score: total-score, point-spread: point-spread}
-              ;; Ensure the event is resolved
-              (asserts! event-resolved (err ERR_EVENT_NOT_RESOLVED))
-              ;; Ensure the winnings have not been claimed
-              (asserts! (is-eq payout-claimed false) (err ERR_ALREADY_CLAIMED))
+    (let (
+          (betting-event (unwrap! (map-get betting-events {event-id: (get associated-event-id bet-details)}) (err ERR_INVALID_OUTCOME))) ;; Use unwrap! with map-get
+         )
+      ;; Ensure the event is resolved
+      (asserts! (get event-resolved betting-event) (err ERR_EVENT_NOT_RESOLVED))
+      ;; Ensure the winnings have not been claimed
+      (asserts! (is-eq (get payout-claimed bet-details) false) (err ERR_ALREADY_CLAIMED))
 
-              ;; Calculate payout based on bet type
-              (let ((payout 
-                      (match bet-type
-                        "single" 
-                          (if (is-eq winning-outcome (some chosen-outcome))
-                            (unwrap! (calculate-single-payout event-id chosen-outcome bet-amount) (err ERR_INVALID_OUTCOME))
-                            (err ERR_NOT_A_WINNER))
-                        
-                        "parlay" 
-                          (unwrap! (calculate-parlay-payout bet-details bet-amount) (err ERR_INVALID_OUTCOME))
-                        
-                        "over/under" 
-                          (unwrap! (calculate-over-under-payout bet-details total-score bet-amount) (err ERR_INVALID_OUTCOME))
-                        
-                        "point-spread" 
-                          (unwrap! (calculate-point-spread-payout chosen-outcome point-spread bet-amount) (err ERR_INVALID_OUTCOME))
-                        
-                        (err ERR_INVALID_BET_TYPE)
-                      )
-                    ))
-                ;; Transfer winnings
-                (stx-transfer? payout tx-sender bettor)
+      ;; Calculate payout based on bet type
+      (let ((payout 
+              (match (get bet-type bet-details)
+                "single" 
+                  (if (is-eq (get winning-outcome betting-event) (some (get chosen-outcome bet-details)))
+                    (unwrap! (calculate-single-payout (get associated-event-id bet-details) (get chosen-outcome bet-details) (get bet-amount bet-details)) (err ERR_INVALID_OUTCOME))
+                    (err ERR_NOT_A_WINNER))
                 
-                ;; Mark the bet as claimed
-                (map-set placed-bets
-                  {bet-id: bet-id}
-                  {associated-event-id: event-id, bettor-address: bettor, bet-amount: bet-amount, 
-                   chosen-outcome: chosen-outcome, bet-type: bet-type, bet-details: bet-details, payout-claimed: true}
-                )
+                "parlay" 
+                  (unwrap! (calculate-parlay-payout (get bet-details bet-details) (get bet-amount bet-details)) (err ERR_INVALID_OUTCOME))
                 
-                ;; Emit event log
-                (print {event: "winnings-claimed", bet-id: bet-id, amount: payout})
+                "over/under" 
+                  (unwrap! (calculate-over-under-payout (get bet-details bet-details) (get total-score betting-event) (get bet-amount bet-details)) (err ERR_INVALID_OUTCOME))
                 
-                (ok payout)
+                "point-spread" 
+                  (unwrap! (calculate-point-spread-payout (get chosen-outcome bet-details) (get point-spread betting-event) (get bet-amount bet-details)) (err ERR_INVALID_OUTCOME))
+                
+                (err ERR_INVALID_BET_TYPE)
               )
-            )
-            (none (err ERR_INVALID_OUTCOME))
-          )
+            ))
+        ;; Transfer winnings
+        (stx-transfer? payout tx-sender (get bettor-address bet-details))
+        
+        ;; Mark the bet as claimed
+        (map-set placed-bets
+          {bet-id: bet-id}
+          {associated-event-id: (get associated-event-id bet-details), bettor-address: (get bettor-address bet-details), bet-amount: (get bet-amount bet-details), 
+           chosen-outcome: (get chosen-outcome bet-details), bet-type: (get bet-type bet-details), bet-details: (get bet-details bet-details), payout-claimed: true}
         )
+        
+        ;; Emit event log
+        (print {event: "winnings-claimed", bet-id: bet-id, amount: payout})
+        
+        (ok payout)
       )
-      (none (err ERR_INVALID_OUTCOME))
     )
   )
 )
@@ -269,7 +243,7 @@
 ;; Helper function to get odds for each event in a parlay bet
 (define-read-only (get-parlay-odds (event-str (string-ascii 20)))
   (let ((event-id (parse-int event-str)))
-    (unwrap! (calculate-odds event-id (get 0 (map-get betting-events {event-id: event-id}))) u0)
+    (unwrap! (calculate-odds event-id (get 0 (unwrap! (map-get betting-events {event-id: event-id}) (err u0)))) u0)
   )
 )
 
