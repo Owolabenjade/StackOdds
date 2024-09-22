@@ -279,18 +279,25 @@
 
 ;; Helper function to split a string into a list
 (define-read-only (split-string (str (string-ascii 50)) (delimiter (string-ascii 1)))
-  (fold split-string-fold (list) (string-to-list str))
+  (fold split-string-fold 
+        { acc: (list), current: "" } 
+        (string-chars str))
 )
 
 ;; Helper function for string splitting
-(define-read-only (split-string-fold (char (string-ascii 1)) (result (list 10 (string-ascii 20))))
-  (let ((current-string (unwrap! (element-at result 0) ""))
-        (result-list (unwrap! (element-at result 1) (list))))
+(define-read-only (split-string-fold (char (string-utf8 1)) (state { acc: (list 10 (string-ascii 20)), current: (string-ascii 20) }))
+  (let ((current (get current state))
+        (acc (get acc state)))
     (if (is-eq char ",")
-        (list "" (append result-list current-string))
-        (list (concat current-string char) result-list)
+        { acc: (append acc current), current: "" }
+        { acc: acc, current: (concat current char) }
     )
   )
+)
+
+;; Helper function to convert a string to a list of characters
+(define-read-only (string-chars (str (string-ascii 50)))
+  (map unwrap-panic (string-to-utf8 str))
 )
 
 ;; Function to get contract balance
