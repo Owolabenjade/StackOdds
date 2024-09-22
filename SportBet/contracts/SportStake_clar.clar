@@ -93,7 +93,7 @@
     ;; Calculate new total staked amount
     (let (
           (new-total-staked (+ (get total-staked betting-event) (stx-get-balance tx-sender)))
-          (new-outcome-staked (+ (get selected-outcome (get outcome-staked betting-event) u0) (stx-get-balance tx-sender)))
+          (new-outcome-staked (+ (default-to u0 (get selected-outcome (get outcome-staked betting-event))) (stx-get-balance tx-sender)))
          )
       ;; Update event with new staked amounts
       (map-set betting-events
@@ -124,10 +124,7 @@
 
 ;; Function to merge new staked amount with existing outcome stakes
 (define-read-only (merge-outcome-staked (outcome-staked (map (string-ascii 20) uint)) (selected-outcome (string-ascii 20)) (amount uint))
-  (if (is-eq (get selected-outcome outcome-staked) none)
-    (merge outcome-staked {selected-outcome: amount})
-    (merge outcome-staked {selected-outcome: (+ (get selected-outcome outcome-staked u0) amount)})
-  )
+  (merge outcome-staked {selected-outcome: (+ (default-to u0 (get selected-outcome outcome-staked)) amount)})
 )
 
 ;; Function to calculate odds for an outcome
@@ -135,7 +132,7 @@
   (let ((event (unwrap! (map-get? betting-events {event-id: event-id}) (err u0))))
     (if (is-eq (get total-staked event) u0)
       (err u0) ;; Avoid division by zero
-      (ok (/ (* (get total-staked event) u100) (get selected-outcome (get outcome-staked event) u1))) ;; Odds calculation
+      (ok (/ (* (get total-staked event) u100) (default-to u1 (get selected-outcome (get outcome-staked event))))) ;; Odds calculation
     )
   )
 )
@@ -204,13 +201,12 @@
               )
             ))
         ;; Transfer winnings
-        (stx-transfer? payout tx-sender (get bettor-address bet-details))
+        (as-contract (stx-transfer? payout tx-sender (get bettor-address bet-details)))
         
         ;; Mark the bet as claimed
         (map-set placed-bets
           {bet-id: bet-id}
-          {associated-event-id: (get associated-event-id bet-details), bettor-address: (get bettor-address bet-details), bet-amount: (get bet-amount bet-details), 
-           chosen-outcome: (get chosen-outcome bet-details), bet-type: (get bet-type bet-details), bet-details: (get bet-details bet-details), payout-claimed: true}
+          (merge bet-details {payout-claimed: true})
         )
         
         ;; Emit event log
@@ -224,7 +220,7 @@
 
 ;; Function to calculate payout for single bets
 (define-read-only (calculate-single-payout (event-id uint) (chosen-outcome (string-ascii 20)) (bet-amount uint))
-  (let ((odds (unwrap! (calculate-odds event-id chosen-outcome) ERR_INVALID_INPUT)))
+  (let ((odds (unwrap! (calculate-odds event-id chosen-outcome) (err ERR_INVALID_INPUT))))
     (ok (/ (* bet-amount odds) u100))
   )
 )
@@ -232,39 +228,47 @@
 ;; Function to calculate payout for parlay bets
 (define-read-only (calculate-parlay-payout (bet-details (optional (string-ascii 50))) (bet-amount uint))
   ;; Example logic for parlay payout calculation: Combine odds for all events in the parlay
-  (if (is-none bet-details)
+  (match bet-details
+    details (let ((events (split-string details ",")))
+              (ok (/ (* bet-amount (fold + u1 (map get-parlay-odds events))) u100)))
     (err ERR_INVALID_BET_DETAILS)
-    (let ((events (split-string (unwrap bet-details "") ",")))
-      (ok (/ (* bet-amount (reduce (lambda (acc odds) (* acc (parse-int odds))) u1 (map get-parlay-odds events))) u100))
-    )
   )
 )
 
 ;; Helper function to get odds for each event in a parlay bet
 (define-read-only (get-parlay-odds (event-str (string-ascii 20)))
-  (let ((event-id (parse-int event-str)))
-    (unwrap! (calculate-odds event-id (get 0 (unwrap! (map-get? betting-events {event-id: event-id}) (err u0)))) u0)
+  (let ((event-id (to-uint (as-int event-str))))
+    (match (calculate-odds event-id (get 0 (unwrap! (map-get? betting-events {event-id: event-id}) u0)))
+      success u100
+      u0)
   )
 )
 
 ;; Function to calculate payout for over/under bets
 (define-read-only (calculate-over-under-payout (bet-details (optional (string-ascii 50))) (total-score (optional uint)) (bet-amount uint))
-  (if (or (is-none bet-details) (is-none total-score))
-    (err ERR_MISSING_DATA)
-    (let ((threshold (parse-int (unwrap bet-details ""))))
-      (if (> (unwrap total-score u0) threshold)
-        (ok (* bet-amount u2)) ;; Double payout for winning over bet
-        (ok (/ bet-amount u2)) ;; Half payout for losing over bet
-      )
-    )
+  (match (unwrap-panic bet-details)
+    threshold (match total-score
+                actual-score (if (> actual-score (to-uint (as-int threshold)))
+                                (ok (* bet-amount u2)) ;; Double payout for winning over bet
+                                (ok (/ bet-amount u2))) ;; Half payout for losing over bet
+                (err ERR_MISSING_DATA))
+    (err ERR_INVALID_BET_DETAILS)
   )
 )
 
 ;; Function to calculate payout for point spread bets
 (define-read-only (calculate-point-spread-payout (chosen-outcome (string-ascii 20)) (point-spread (optional int)) (bet-amount uint))
-  (if (is-none point-spread)
+  (match point-spread
+    spread (if (>= spread 0)
+               (ok (* bet-amount u2)) ;; Double payout for beating the spread
+               (ok (/ bet-amount u2))) ;; Half payout for not covering the spread
     (err ERR_MISSING_DATA)
-    (let ((spread (unwrap point-spread 0)))
-      (if (>= spread 0)
-        (ok (* bet-amount u2)) ;; Double payout for beating the spread
-        (ok (/ bet-amount u2)) ;; Half
+  )
+)
+
+;; Function to validate bet types and details
+(define-read-only (is-valid-bet-type (bet-type (string-ascii 20)) (bet-details (optional (string-ascii 50))))
+  (match bet-type
+    "single" (ok true)
+    "parlay" (if (is-some bet-details) (ok true) (err ERR_INVALID_BET_DETAILS))
+    "over/under" (if (is-some bet-details) (ok true) (err ERR_INVALID_BET
