@@ -279,27 +279,22 @@
 
 ;; Helper function to split a string into a list
 (define-read-only (split-string (str (string-ascii 50)) (delimiter (string-ascii 1)))
-  (let ((str-len (len str)))
-    (if (<= str-len u0)
-      (err "Empty string")
-      (let ((result (list)))
-        (var-set split-string-result result)
-        (var-set split-string-current "")
-        (for char-index (range u0 str-len)
-          (let ((current-char (slice str char-index (+ char-index u1))))
-            (if (is-eq current-char delimiter)
-              (begin
-                (var-set split-string-result (append (var-get split-string-result) (var-get split-string-current)))
-                (var-set split-string-current "")
-              )
-              (var-set split-string-current (concat (var-get split-string-current) current-char))
-            )
-          )
-        )
-        (if (is-eq (var-get split-string-current) "")
-          (var-get split-string-result)
-          (append (var-get split-string-result) (var-get split-string-current))
-        )
+  (split-helper str delimiter u0 (len str) (list) ""))
+
+;; Helper function to split a string into a list using recursion
+(define-read-only (split-helper (str (string-ascii 50)) (delimiter (string-ascii 1)) (index uint) (str-len uint) (acc (list 10 (string-ascii 50))) (current (string-ascii 50)))
+  (if (>= index str-len)
+    ;; End of string reached, add the last segment to accumulator
+    (if (is-eq current "")
+      acc
+      (append acc current))
+    ;; Continue processing the string
+    (let ((char (slice str index (+ index u1))))
+      (if (is-eq char delimiter)
+        ;; Delimiter found, add current segment to accumulator and reset current
+        (split-helper str delimiter (+ index u1) str-len (append acc current) "")
+        ;; No delimiter, add char to current segment
+        (split-helper str delimiter (+ index u1) str-len acc (concat current char))
       )
     )
   )
