@@ -57,7 +57,7 @@
     (asserts! (> (len name) u0) ERR-INVALID-NAME)
     (asserts! (validate-options options) ERR-INVALID-OPTIONS)
     (asserts! (validate-odds odds) ERR-INVALID-ODDS)
-    (asserts! (= (len options) (len odds)) ERR-INVALID-ODDS)
+    (asserts! (is-eq (len options) (len odds)) ERR-INVALID-ODDS)
     (asserts! (> start-block block-height) ERR-INVALID-START-TIME)
     (asserts! (> end-block start-block) ERR-INVALID-END-TIME)
     (map-set events { id: event-id } 
