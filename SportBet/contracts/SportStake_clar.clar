@@ -83,8 +83,7 @@
         (betting-event (unwrap! (map-get? betting-events {event-id: event-id}) (err ERR_INVALID_OUTCOME)))
        )
     ;; Check if the selected outcome is valid
-    (asserts! (or (is-eq (get 0 (get possible-outcomes betting-event)) selected-outcome)
-                  (is-eq (get 1 (get possible-outcomes betting-event)) selected-outcome)) (err ERR_INVALID_OUTCOME))
+    (asserts! (is-valid-outcome selected-outcome (get possible-outcomes betting-event)) (err ERR_INVALID_OUTCOME))
     ;; Ensure the event is not resolved yet
     (asserts! (is-eq (get event-resolved betting-event) false) (err ERR_EVENT_NOT_RESOLVED))
     ;; Validate bet type and details
@@ -122,6 +121,11 @@
   )
 )
 
+;; Helper function to validate if the selected outcome is valid for the given outcomes list
+(define-read-only (is-valid-outcome (selected-outcome (string-ascii 20)) (outcomes (list 2 (string-ascii 20))))
+  (or (is-eq selected-outcome (get 0 outcomes)) (is-eq selected-outcome (get 1 outcomes)))
+)
+
 ;; Function to merge new staked amount with existing outcome stakes
 (define-read-only (merge-outcome-staked (outcome-staked (map (string-ascii 20) uint)) (selected-outcome (string-ascii 20)) (amount uint))
   (merge outcome-staked {selected-outcome: (+ (default-to u0 (get selected-outcome outcome-staked)) amount)})
@@ -145,8 +149,7 @@
     ;; Ensure only the contract owner can resolve
     (asserts! (is-eq tx-sender (var-get contract-owner)) (err ERR_UNAUTHORIZED))
     ;; Check if the selected winning outcome is valid
-    (asserts! (or (is-eq (get 0 (get possible-outcomes betting-event)) winning-outcome)
-                  (is-eq (get 1 (get possible-outcomes betting-event)) winning-outcome)) (err ERR_INVALID_OUTCOME))
+    (asserts! (is-valid-outcome winning-outcome (get possible-outcomes betting-event)) (err ERR_INVALID_OUTCOME))
     ;; Ensure the event is not already resolved
     (asserts! (is-eq (get event-resolved betting-event) false) (err ERR_EVENT_NOT_RESOLVED))
     
@@ -228,45 +231,47 @@
 ;; Function to calculate payout for parlay bets
 (define-read-only (calculate-parlay-payout (bet-details (optional (string-ascii 50))) (bet-amount uint))
   ;; Example logic for parlay payout calculation: Combine odds for all events in the parlay
-  (match bet-details
-    details (let ((events (split-string details ",")))
-              (ok (/ (* bet-amount (fold + u1 (map get-parlay-odds events))) u100)))
+  (if (is-none bet-details)
     (err ERR_INVALID_BET_DETAILS)
-  )
-)
-
-;; Helper function to get odds for each event in a parlay bet
-(define-read-only (get-parlay-odds (event-str (string-ascii 20)))
-  (let ((event-id (to-uint (as-int event-str))))
-    (match (calculate-odds event-id (get 0 (unwrap! (map-get? betting-events {event-id: event-id}) u0)))
-      success u100
-      u0)
+    (let ((details (unwrap-panic bet-details)))
+      ;; Example: Double the amount for illustration
+      (ok (* bet-amount u2))
+    )
   )
 )
 
 ;; Function to calculate payout for over/under bets
 (define-read-only (calculate-over-under-payout (bet-details (optional (string-ascii 50))) (total-score (optional uint)) (bet-amount uint))
-  (match (unwrap-panic bet-details)
-    threshold (match total-score
-                actual-score (if (> actual-score (to-uint (as-int threshold)))
-                                (ok (* bet-amount u2)) ;; Double payout for winning over bet
-                                (ok (/ bet-amount u2))) ;; Half payout for losing over bet
-                (err ERR_MISSING_DATA))
+  (if (is-none bet-details)
     (err ERR_INVALID_BET_DETAILS)
+    (let ((details (unwrap-panic bet-details)))
+      (if (is-none total-score)
+        (err ERR_MISSING_DATA)
+        (let ((actual-score (unwrap-panic total-score)))
+          (if (> actual-score (to-uint (as-int details)))
+            (ok (* bet-amount u2)) ;; Double payout for winning over bet
+            (ok (/ bet-amount u2)) ;; Half payout for losing over bet
+          )
+        )
+      )
+    )
   )
 )
 
 ;; Function to calculate payout for point spread bets
 (define-read-only (calculate-point-spread-payout (chosen-outcome (string-ascii 20)) (point-spread (optional int)) (bet-amount uint))
-  (match point-spread
-    spread (if (>= spread 0)
-               (ok (* bet-amount u2)) ;; Double payout for beating the spread
-               (ok (/ bet-amount u2))) ;; Half payout for not covering the spread
+  (if (is-none point-spread)
     (err ERR_MISSING_DATA)
+    (let ((spread (unwrap-panic point-spread)))
+      (if (>= spread 0)
+        (ok (* bet-amount u2)) ;; Double payout for beating the spread
+        (ok (/ bet-amount u2)) ;; Half payout for not covering the spread
+      )
+    )
   )
 )
 
-;; Function to validate bet types and details (continued)
+;; Function to validate bet types and details
 (define-read-only (is-valid-bet-type (bet-type (string-ascii 20)) (bet-details (optional (string-ascii 50))))
   (match bet-type
     "single" (ok true)
@@ -274,29 +279,6 @@
     "over/under" (if (is-some bet-details) (ok true) (err ERR_INVALID_BET_DETAILS))
     "point-spread" (if (is-some bet-details) (ok true) (err ERR_INVALID_BET_DETAILS))
     (err ERR_INVALID_BET_TYPE)
-  )
-)
-
-;; Helper function to split a string into a list
-(define-read-only (split-string (str (string-ascii 50)) (delimiter (string-ascii 1)))
-  (split-helper str delimiter u0 (len str) (list) ""))
-
-;; Helper function to split a string into a list using recursion
-(define-read-only (split-helper (str (string-ascii 50)) (delimiter (string-ascii 1)) (index uint) (str-len uint) (acc (list 10 (string-ascii 50))) (current (string-ascii 50)))
-  (if (>= index str-len)
-    ;; End of string reached, add the last segment to accumulator
-    (if (is-eq current "")
-      acc
-      (append acc current))
-    ;; Continue processing the string
-    (let ((char (slice str index (+ index u1))))
-      (if (is-eq char delimiter)
-        ;; Delimiter found, add current segment to accumulator and reset current
-        (split-helper str delimiter (+ index u1) str-len (append acc current) "")
-        ;; No delimiter, add char to current segment
-        (split-helper str delimiter (+ index u1) str-len acc (concat current char))
-      )
-    )
   )
 )
 
