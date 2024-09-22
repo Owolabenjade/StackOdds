@@ -77,7 +77,7 @@
 (define-public (place-bet-on-event (event-id uint) (selected-outcome (string-ascii 20)) (bet-type (string-ascii 20)) (bet-details (optional (string-ascii 50))))
   (let (
         (new-bet-id (+ (var-get total-bet-count) u1))
-        (betting-event (unwrap! (map-get? betting-events {event-id: event-id}) (err ERR_INVALID_OUTCOME))) ;; Use unwrap! with map-get?
+        (betting-event (unwrap! (map-get? betting-events {event-id: event-id}) (err ERR_INVALID_OUTCOME)))
        )
     ;; Check if the selected outcome is valid
     (asserts! (or (is-eq (get 0 (get possible-outcomes betting-event)) selected-outcome)
@@ -131,7 +131,7 @@
 
 ;; Function to calculate odds for an outcome
 (define-read-only (calculate-odds (event-id uint) (selected-outcome (string-ascii 20)))
-  (let ((event (unwrap! (map-get? betting-events {event-id: event-id}) (err u0)))) ;; Use unwrap! with map-get?
+  (let ((event (unwrap! (map-get? betting-events {event-id: event-id}) (err u0))))
     (if (is-eq (get total-staked event) u0)
       (err u0) ;; Avoid division by zero
       (ok (/ (* (get total-staked event) u100) (get selected-outcome (get outcome-staked event) u1))) ;; Odds calculation
@@ -142,10 +142,10 @@
 ;; Function to resolve a betting event and declare a winning outcome
 (define-public (resolve-betting-event (event-id uint) (winning-outcome (string-ascii 20)) (total-score (optional uint)))
   (let (
-        (betting-event (unwrap! (map-get? betting-events {event-id: event-id}) (err ERR_INVALID_OUTCOME))) ;; Use unwrap! with map-get?
+        (betting-event (unwrap! (map-get? betting-events {event-id: event-id}) (err ERR_INVALID_OUTCOME)))
        )
     ;; Ensure only the contract owner can resolve
-    (asserts! (is-eq (tx-sender) (contract-owner?)) (err ERR_UNAUTHORIZED))
+    (asserts! (is-eq tx-sender (contract-owner)) (err ERR_UNAUTHORIZED))
     ;; Check if the selected winning outcome is valid
     (asserts! (or (is-eq (get 0 (get possible-outcomes betting-event)) winning-outcome)
                   (is-eq (get 1 (get possible-outcomes betting-event)) winning-outcome)) (err ERR_INVALID_OUTCOME))
@@ -173,10 +173,10 @@
 ;; Function to claim winnings from a resolved bet with complex logic for parlay, over/under, and point spread bets
 (define-public (claim-bet-winnings (bet-id uint))
   (let (
-        (bet-details (unwrap! (map-get? placed-bets {bet-id: bet-id}) (err ERR_INVALID_OUTCOME))) ;; Use unwrap! with map-get?
+        (bet-details (unwrap! (map-get? placed-bets {bet-id: bet-id}) (err ERR_INVALID_OUTCOME)))
        )
     (let (
-          (betting-event (unwrap! (map-get? betting-events {event-id: (get associated-event-id bet-details)}) (err ERR_INVALID_OUTCOME))) ;; Use unwrap! with map-get?
+          (betting-event (unwrap! (map-get? betting-events {event-id: (get associated-event-id bet-details)}) (err ERR_INVALID_OUTCOME)))
          )
       ;; Ensure the event is resolved
       (asserts! (get event-resolved betting-event) (err ERR_EVENT_NOT_RESOLVED))
