@@ -266,9 +266,83 @@
   )
 )
 
-;; Function to validate bet types and details
+;; Function to validate bet types and details (continued)
 (define-read-only (is-valid-bet-type (bet-type (string-ascii 20)) (bet-details (optional (string-ascii 50))))
   (match bet-type
     "single" (ok true)
     "parlay" (if (is-some bet-details) (ok true) (err ERR_INVALID_BET_DETAILS))
-    "over/under" (if (is-some bet-details) (ok true) (err ERR_INVALID_BET
+    "over/under" (if (is-some bet-details) (ok true) (err ERR_INVALID_BET_DETAILS))
+    "point-spread" (if (is-some bet-details) (ok true) (err ERR_INVALID_BET_DETAILS))
+    (err ERR_INVALID_BET_TYPE)
+  )
+)
+
+;; Helper function to split a string into a list
+(define-read-only (split-string (str (string-ascii 50)) (delimiter (string-ascii 1)))
+  (fold split-string-fold (list) (string-to-list str))
+)
+
+;; Helper function for string splitting
+(define-read-only (split-string-fold (char (string-ascii 1)) (result (list 10 (string-ascii 20))))
+  (let ((current-string (unwrap! (element-at result 0) ""))
+        (result-list (unwrap! (element-at result 1) (list))))
+    (if (is-eq char ",")
+        (list "" (append result-list current-string))
+        (list (concat current-string char) result-list)
+    )
+  )
+)
+
+;; Function to get contract balance
+(define-read-only (get-contract-balance)
+  (stx-get-balance (as-contract tx-sender))
+)
+
+;; Function to withdraw funds (only contract owner)
+(define-public (withdraw-funds (amount uint))
+  (begin
+    (asserts! (is-eq tx-sender (var-get contract-owner)) (err ERR_UNAUTHORIZED))
+    (as-contract (stx-transfer? amount tx-sender (var-get contract-owner)))
+  )
+)
+
+;; Function to change contract owner
+(define-public (change-owner (new-owner principal))
+  (begin
+    (asserts! (is-eq tx-sender (var-get contract-owner)) (err ERR_UNAUTHORIZED))
+    (ok (var-set contract-owner new-owner))
+  )
+)
+
+;; Function to get event details
+(define-read-only (get-event-details (event-id uint))
+  (map-get? betting-events {event-id: event-id})
+)
+
+;; Function to get bet details
+(define-read-only (get-bet-details (bet-id uint))
+  (map-get? placed-bets {bet-id: bet-id})
+)
+
+;; Function to get total events count
+(define-read-only (get-total-events-count)
+  (var-get total-event-count)
+)
+
+;; Function to get total bets count
+(define-read-only (get-total-bets-count)
+  (var-get total-bet-count)
+)
+
+;; Initialize contract
+(begin
+  ;; Set initial contract owner
+  (var-set contract-owner tx-sender)
+  
+  ;; Set initial counters
+  (var-set total-event-count u0)
+  (var-set total-bet-count u0)
+  
+  ;; Log contract deployment
+  (print {event: "contract-deployed", owner: tx-sender})
+)
