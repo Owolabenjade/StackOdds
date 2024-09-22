@@ -33,6 +33,7 @@
 (define-constant ERR-INVALID-ODDS (err u110))
 (define-constant ERR-INVALID-NAME (err u111))
 (define-constant ERR-BET-NOT-FOUND (err u112))
+(define-constant ERR-EVENT-NOT-RESOLVED (err u113))
 
 ;; Helper functions for input validation
 (define-private (validate-options (options (list 5 (string-ascii 20))))
@@ -128,11 +129,12 @@
 
 ;; Helper function to check if betting is open for an event
 (define-read-only (is-betting-open (event-id uint))
-  (let (
-    (event (unwrap! (map-get? events { id: event-id }) false))
-    (start-block (get start-block event))
-    (end-block (get end-block event))
-  )
-    (and (>= block-height start-block) (< block-height end-block))
+  (match (map-get? events { id: event-id })
+    event (let (
+      (start-block (get start-block event))
+      (end-block (get end-block event))
+    )
+      (and (>= block-height start-block) (< block-height end-block)))
+    false
   )
 )
