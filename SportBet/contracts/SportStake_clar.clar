@@ -29,21 +29,41 @@
 (define-constant ERR-INVALID-END-TIME (err u106))
 (define-constant ERR-BETTING-CLOSED (err u107))
 (define-constant ERR-EVENT-NOT-ENDED (err u108))
+(define-constant ERR-INVALID-OPTIONS (err u109))
+(define-constant ERR-INVALID-ODDS (err u110))
+(define-constant ERR-INVALID-NAME (err u111))
+
+;; Helper functions for input validation
+(define-private (validate-options (options (list 5 (string-ascii 20))))
+  (and 
+    (> (len options) u0)
+    (<= (len options) u5)
+    (is-none (index-of options ""))
+  )
+)
+
+(define-private (validate-odds (odds (list 5 uint)))
+  (and 
+    (> (len odds) u0)
+    (<= (len odds) u5)
+    (is-none (index-of odds u0))
+  )
+)
 
 ;; Create a new event
 (define-public (create-event (name (string-ascii 100)) (options (list 5 (string-ascii 20))) (odds (list 5 uint)) (start-block uint) (end-block uint))
   (let ((event-id (var-get next-event-id)))
-    (if (is-eq tx-sender (var-get admin))
-        (begin
-          (asserts! (> start-block block-height) ERR-INVALID-START-TIME)
-          (asserts! (> end-block start-block) ERR-INVALID-END-TIME)
-          (map-set events { id: event-id } 
-            { name: name, options: options, odds: odds, start-block: start-block, end-block: end-block, result: none })
-          (var-set next-event-id (+ event-id u1))
-          (ok event-id)
-        )
-        ERR-NOT-AUTHORIZED
-    )
+    (asserts! (is-eq tx-sender (var-get admin)) ERR-NOT-AUTHORIZED)
+    (asserts! (> (len name) u0) ERR-INVALID-NAME)
+    (asserts! (validate-options options) ERR-INVALID-OPTIONS)
+    (asserts! (validate-odds odds) ERR-INVALID-ODDS)
+    (asserts! (= (len options) (len odds)) ERR-INVALID-ODDS)
+    (asserts! (> start-block block-height) ERR-INVALID-START-TIME)
+    (asserts! (> end-block start-block) ERR-INVALID-END-TIME)
+    (map-set events { id: event-id } 
+      { name: name, options: options, odds: odds, start-block: start-block, end-block: end-block, result: none })
+    (var-set next-event-id (+ event-id u1))
+    (ok event-id)
   )
 )
 
@@ -58,6 +78,7 @@
     (asserts! (is-none (get result event)) ERR-EVENT-ALREADY-RESOLVED)
     (asserts! (is-some (index-of options prediction)) ERR-INVALID-PREDICTION)
     (asserts! (and (>= block-height start-block) (< block-height end-block)) ERR-BETTING-CLOSED)
+    (asserts! (> amount u0) ERR-INSUFFICIENT-BALANCE)
     (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
     (map-set bets { bettor: tx-sender, event-id: event-id, prediction: prediction } { amount: amount })
     (ok true)
@@ -69,16 +90,13 @@
   (let (
     (event (unwrap! (map-get? events { id: event-id }) ERR-EVENT-NOT-FOUND))
     (end-block (get end-block event))
+    (options (get options event))
   )
+    (asserts! (is-eq tx-sender (var-get admin)) ERR-NOT-AUTHORIZED)
     (asserts! (>= block-height end-block) ERR-EVENT-NOT-ENDED)
-    (if (is-eq tx-sender (var-get admin))
-        (begin
-          (map-set events { id: event-id } 
-            (merge event { result: (some result) }))
-          (ok true)
-        )
-        ERR-NOT-AUTHORIZED
-    )
+    (asserts! (is-some (index-of options result)) ERR-INVALID-PREDICTION)
+    (ok (map-set events { id: event-id } 
+      (merge event { result: (some result) })))
   )
 )
 
