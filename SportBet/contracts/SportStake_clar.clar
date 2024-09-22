@@ -1,8 +1,11 @@
 ;; Smart contract for a simple sports betting system on Stacks blockchain using Clarity.
 ;; This contract includes functionalities for creating events, placing bets, and resolving them.
 
-(define-data-var total-event-count uint 0) ;; Counter for total number of events
-(define-data-var total-bet-count uint 0) ;; Counter for total number of bets
+;; Define contract owner
+(define-data-var contract-owner principal tx-sender)
+
+(define-data-var total-event-count uint u0) ;; Counter for total number of events
+(define-data-var total-bet-count uint u0) ;; Counter for total number of bets
 
 (define-map betting-events
   {
@@ -84,7 +87,6 @@
                   (is-eq (get 1 (get possible-outcomes betting-event)) selected-outcome)) (err ERR_INVALID_OUTCOME))
     ;; Ensure the event is not resolved yet
     (asserts! (is-eq (get event-resolved betting-event) false) (err ERR_EVENT_NOT_RESOLVED))
-
     ;; Validate bet type and details
     (asserts! (is-valid-bet-type bet-type bet-details) (err ERR_INVALID_BET_TYPE))
     
@@ -102,7 +104,6 @@
          point-spread: (get point-spread betting-event),
          total-staked: new-total-staked, outcome-staked: (merge-outcome-staked (get outcome-staked betting-event) selected-outcome (stx-get-balance tx-sender))}
       )
-
       ;; Save the bet information
       (map-set placed-bets
         {bet-id: new-bet-id}
@@ -145,7 +146,7 @@
         (betting-event (unwrap! (map-get? betting-events {event-id: event-id}) (err ERR_INVALID_OUTCOME)))
        )
     ;; Ensure only the contract owner can resolve
-    (asserts! (is-eq tx-sender (contract-owner)) (err ERR_UNAUTHORIZED))
+    (asserts! (is-eq tx-sender (var-get contract-owner)) (err ERR_UNAUTHORIZED))
     ;; Check if the selected winning outcome is valid
     (asserts! (or (is-eq (get 0 (get possible-outcomes betting-event)) winning-outcome)
                   (is-eq (get 1 (get possible-outcomes betting-event)) winning-outcome)) (err ERR_INVALID_OUTCOME))
@@ -182,7 +183,6 @@
       (asserts! (get event-resolved betting-event) (err ERR_EVENT_NOT_RESOLVED))
       ;; Ensure the winnings have not been claimed
       (asserts! (is-eq (get payout-claimed bet-details) false) (err ERR_ALREADY_CLAIMED))
-
       ;; Calculate payout based on bet type
       (let ((payout 
               (match (get bet-type bet-details)
@@ -267,19 +267,4 @@
     (let ((spread (unwrap point-spread 0)))
       (if (>= spread 0)
         (ok (* bet-amount u2)) ;; Double payout for beating the spread
-        (ok (/ bet-amount u2)) ;; Half payout for not covering the spread
-      )
-    )
-  )
-)
-
-;; Function to validate bet types and details
-(define-read-only (is-valid-bet-type (bet-type (string-ascii 20)) (bet-details (optional (string-ascii 50))))
-  (match bet-type
-    "single" (ok true)
-    "parlay" (if (is-some bet-details) (ok true) (err ERR_INVALID_BET_DETAILS))
-    "over/under" (if (is-some bet-details) (ok true) (err ERR_INVALID_BET_DETAILS))
-    "point-spread" (if (is-some bet-details) (ok true) (err ERR_INVALID_BET_DETAILS))
-    (err ERR_INVALID_BET_TYPE)
-  )
-)
+        (ok (/ bet-amount u2)) ;; Half
