@@ -80,8 +80,7 @@
     (asserts! (and (>= block-height start-block) (< block-height end-block)) ERR-BETTING-CLOSED)
     (asserts! (> amount u0) ERR-INSUFFICIENT-BALANCE)
     (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
-    (map-set bets { bettor: tx-sender, event-id: event-id, prediction: prediction } { amount: amount })
-    (ok true)
+    (ok (map-set bets { bettor: tx-sender, event-id: event-id, prediction: prediction } { amount: amount }))
   )
 )
 
@@ -112,7 +111,7 @@
     (odds (unwrap! (element-at odds-list index) ERR-INVALID-PREDICTION))
     (payout (/ (* amount odds) u100))  ;; Assuming odds are represented as percentages
   )
-    (map-delete bets { bettor: tx-sender, event-id: event-id, prediction: result })
+    (try! (map-delete bets { bettor: tx-sender, event-id: event-id, prediction: result }))
     (as-contract (stx-transfer? payout tx-sender tx-sender))
   )
 )
