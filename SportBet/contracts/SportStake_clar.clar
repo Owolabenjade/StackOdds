@@ -34,11 +34,6 @@
   }
 )
 
-(define-event event-created (event-id uint event-title (string-ascii 100)))
-(define-event bet-placed (bet-id uint event-id uint bettor principal amount uint outcome (string-ascii 20) bet-type (string-ascii 20)))
-(define-event event-resolved (event-id uint winning-outcome (string-ascii 20)))
-(define-event winnings-claimed (bet-id uint amount uint))
-
 ;; Error codes for the contract
 (define-constant ERR_INVALID_OUTCOME u100)
 (define-constant ERR_EVENT_NOT_RESOLVED u101)
@@ -69,8 +64,8 @@
       ;; Update the event counter
       (var-set total-event-count new-event-id)
       
-      ;; Emit event
-      (print (event-created new-event-id title))
+      ;; Emit event log
+      (print {event: "event-created", id: new-event-id, title: title})
       
       (ok new-event-id)
     )
@@ -120,8 +115,8 @@
           ;; Update the bet counter
           (var-set total-bet-count new-bet-id)
           
-          ;; Emit event
-          (print (bet-placed new-bet-id event-id tx-sender (stx-get-balance tx-sender) selected-outcome bet-type))
+          ;; Emit event log
+          (print {event: "bet-placed", bet-id: new-bet-id, event-id: event-id, bettor: tx-sender, amount: (stx-get-balance tx-sender), outcome: selected-outcome, type: bet-type})
           
           (ok new-bet-id)
         )
@@ -181,8 +176,8 @@
            outcome-staked: (get outcome-staked (unwrap-panic (map-get betting-events {event-id: event-id})))}
         )
         
-        ;; Emit event
-        (print (event-resolved event-id winning-outcome))
+        ;; Emit event log
+        (print {event: "event-resolved", event-id: event-id, winning-outcome: winning-outcome})
         
         (ok event-id)
       )
@@ -238,8 +233,8 @@
                    chosen-outcome: chosen-outcome, bet-type: bet-type, bet-details: bet-details, payout-claimed: true}
                 )
                 
-                ;; Emit event
-                (print (winnings-claimed bet-id payout))
+                ;; Emit event log
+                (print {event: "winnings-claimed", bet-id: bet-id, amount: payout})
                 
                 (ok payout)
               )
