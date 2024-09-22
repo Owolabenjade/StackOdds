@@ -34,6 +34,7 @@
 (define-constant ERR-INVALID-NAME (err u111))
 (define-constant ERR-BET-NOT-FOUND (err u112))
 (define-constant ERR-EVENT-NOT-RESOLVED (err u113))
+(define-constant ERR-INVALID-EVENT-ID (err u114))
 
 ;; Helper functions for input validation
 (define-private (validate-options (options (list 5 (string-ascii 20))))
@@ -50,6 +51,10 @@
     (<= (len odds) u5)
     (is-none (index-of odds u0))
   )
+)
+
+(define-private (validate-event-id (event-id uint))
+  (and (> event-id u0) (< event-id (var-get next-event-id)))
 )
 
 ;; Create a new event
@@ -71,50 +76,59 @@
 
 ;; Place a bet
 (define-public (place-bet (event-id uint) (prediction (string-ascii 20)) (amount uint))
-  (let (
-    (event (unwrap! (map-get? events { id: event-id }) ERR-EVENT-NOT-FOUND))
-    (options (get options event))
-    (start-block (get start-block event))
-    (end-block (get end-block event))
-  )
-    (asserts! (is-none (get result event)) ERR-EVENT-ALREADY-RESOLVED)
-    (asserts! (is-some (index-of options prediction)) ERR-INVALID-PREDICTION)
-    (asserts! (and (>= block-height start-block) (< block-height end-block)) ERR-BETTING-CLOSED)
-    (asserts! (> amount u0) ERR-INSUFFICIENT-BALANCE)
-    (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
-    (ok (map-set bets { bettor: tx-sender, event-id: event-id, prediction: prediction } { amount: amount }))
+  (begin
+    (asserts! (validate-event-id event-id) ERR-INVALID-EVENT-ID)
+    (let (
+      (event (unwrap! (map-get? events { id: event-id }) ERR-EVENT-NOT-FOUND))
+      (options (get options event))
+      (start-block (get start-block event))
+      (end-block (get end-block event))
+    )
+      (asserts! (is-none (get result event)) ERR-EVENT-ALREADY-RESOLVED)
+      (asserts! (is-some (index-of options prediction)) ERR-INVALID-PREDICTION)
+      (asserts! (and (>= block-height start-block) (< block-height end-block)) ERR-BETTING-CLOSED)
+      (asserts! (> amount u0) ERR-INSUFFICIENT-BALANCE)
+      (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+      (ok (map-set bets { bettor: tx-sender, event-id: event-id, prediction: prediction } { amount: amount }))
+    )
   )
 )
 
 ;; Resolve an event
 (define-public (resolve-event (event-id uint) (result (string-ascii 20)))
-  (let (
-    (event (unwrap! (map-get? events { id: event-id }) ERR-EVENT-NOT-FOUND))
-    (end-block (get end-block event))
-    (options (get options event))
-  )
-    (asserts! (is-eq tx-sender (var-get admin)) ERR-NOT-AUTHORIZED)
-    (asserts! (>= block-height end-block) ERR-EVENT-NOT-ENDED)
-    (asserts! (is-some (index-of options result)) ERR-INVALID-PREDICTION)
-    (ok (map-set events { id: event-id } 
-      (merge event { result: (some result) })))
+  (begin
+    (asserts! (validate-event-id event-id) ERR-INVALID-EVENT-ID)
+    (let (
+      (event (unwrap! (map-get? events { id: event-id }) ERR-EVENT-NOT-FOUND))
+      (end-block (get end-block event))
+      (options (get options event))
+    )
+      (asserts! (is-eq tx-sender (var-get admin)) ERR-NOT-AUTHORIZED)
+      (asserts! (>= block-height end-block) ERR-EVENT-NOT-ENDED)
+      (asserts! (is-some (index-of options result)) ERR-INVALID-PREDICTION)
+      (ok (map-set events { id: event-id } 
+        (merge event { result: (some result) })))
+    )
   )
 )
 
 ;; Claim winnings
 (define-public (claim-winnings (event-id uint))
-  (let (
-    (event (unwrap! (map-get? events { id: event-id }) ERR-EVENT-NOT-FOUND))
-    (result (unwrap! (get result event) ERR-EVENT-NOT-RESOLVED))
-    (bet (unwrap! (map-get? bets { bettor: tx-sender, event-id: event-id, prediction: result }) ERR-BET-NOT-FOUND))
-    (amount (get amount bet))
-    (odds-list (get odds event))
-    (index (unwrap! (index-of (get options event) result) ERR-INVALID-PREDICTION))
-    (odds (unwrap! (element-at odds-list index) ERR-INVALID-PREDICTION))
-    (payout (/ (* amount odds) u100))  ;; Assuming odds are represented as percentages
-  )
-    (asserts! (map-delete bets { bettor: tx-sender, event-id: event-id, prediction: result }) ERR-BET-NOT-FOUND)
-    (as-contract (stx-transfer? payout tx-sender tx-sender))
+  (begin
+    (asserts! (validate-event-id event-id) ERR-INVALID-EVENT-ID)
+    (let (
+      (event (unwrap! (map-get? events { id: event-id }) ERR-EVENT-NOT-FOUND))
+      (result (unwrap! (get result event) ERR-EVENT-NOT-RESOLVED))
+      (bet (unwrap! (map-get? bets { bettor: tx-sender, event-id: event-id, prediction: result }) ERR-BET-NOT-FOUND))
+      (amount (get amount bet))
+      (odds-list (get odds event))
+      (index (unwrap! (index-of (get options event) result) ERR-INVALID-PREDICTION))
+      (odds (unwrap! (element-at odds-list index) ERR-INVALID-PREDICTION))
+      (payout (/ (* amount odds) u100))  ;; Assuming odds are represented as percentages
+    )
+      (asserts! (map-delete bets { bettor: tx-sender, event-id: event-id, prediction: result }) ERR-BET-NOT-FOUND)
+      (as-contract (stx-transfer? payout tx-sender tx-sender))
+    )
   )
 )
 
